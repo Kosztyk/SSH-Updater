@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SSH Updater – Login</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/sshupdater.ico" type="image/x-icon" />
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: #f5f7fb; color: #222; display:flex; flex-direction:column; align-items:center; }
+    header { width: 100%; background: #1f2a44; color: white; padding: 14px 0; display:flex; justify-content:center; align-items:center; gap:10px; }
+    .logo-badge { display:inline-flex; align-items:center; justify-content:center; height:36px; width:36px; border-radius:8px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.2); overflow:hidden; }
+    .logo-badge img { display:block; height:32px; width:32px; object-fit:contain; }
+    header strong { font-size:1.2rem; font-weight:700; }
+
+    main { max-width: 420px; margin: 8vh auto; padding: 0 16px; width:100%; }
+    .card { background:#fff; border-radius:12px; padding:20px; box-shadow:0 4px 16px rgba(0,0,0,.06); }
+    h2 { margin:0 0 12px 0; text-align:center; }
+    label { display:block; font-weight:600; margin-top:10px; }
+    input { width:100%; padding:10px; border:1px solid #ddd; border-radius:8px; }
+    .row { display:flex; gap:8px; margin-top:12px; justify-content:center; }
+    button { border:0; border-radius:8px; padding:10px 14px; cursor:pointer; font-weight:700; }
+    .primary { background:#2d6cdf; color:#fff; }
+    .ghost { background:transparent; border:1px solid #ccc; }
+    .msg { margin-top:8px; font-size:14px; color:#444; text-align:center; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="logo-badge">
+      <img src="/sshupdater.png" alt="SSH Updater Logo" onerror="this.onerror=null;this.src='/ssh-updater-logo-134x134.png';" />
+    </span>
+    <strong>SSH Updater</strong>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>Login</h2>
+      <label>Username</label>
+      <input id="u" type="text" placeholder="Enter username" />
+      <label>Password</label>
+      <input id="p" type="password" placeholder="Enter password" />
+      <div class="row">
+        <button class="primary" onclick="login()">Login</button>
+        <button class="ghost" id="registerBtn" onclick="registerUser()">Register</button>
+      </div>
+      <div class="msg" id="msg"></div>
+    </div>
+  </main>
+
+  <script>
+    async function login() {
+      const r = await fetch('/api/auth/login', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include', // accept Set-Cookie
+        body: JSON.stringify({ username: u.value.trim(), password: p.value })
+      });
+      const data = await r.json();
+      if (data.ok) { location.replace('/'); }
+      else msg.textContent = data.error || 'Login failed';
+    }
+
+    async function registerUser() {
+      const r = await fetch('/api/auth/register', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        credentials:'include', // required once a first user exists
+        body: JSON.stringify({ username: u.value.trim(), password: p.value })
+      });
+      const data = await r.json();
+      if (data.ok) { msg.textContent = 'User created. You can login now.'; }
+      else msg.textContent = data.error || 'Register failed';
+    }
+
+    // On load: hide Register button if at least one user already exists
+    (async function init() {
+      try {
+        const r = await fetch('/api/auth/hasUsers'); // public endpoint
+        const j = await r.json();
+        if (j.hasUsers) document.getElementById('registerBtn').style.display = 'none';
+      } catch(e) { /* ignore, keep button visible on error */ }
+    })();
+  </script>
+</body>
+</html>
+

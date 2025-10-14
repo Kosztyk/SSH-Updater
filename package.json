@@ -1,0 +1,19 @@
+{
+  "name": "ssh-updater",
+  "version": "2.0.0",
+  "description": "Web app to SSH into multiple Linux hosts and run apt update/upgrade with MongoDB storage and auth",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "fs-extra": "^11.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.6.1",
+    "ssh2": "^1.16.0"
+  }
+}

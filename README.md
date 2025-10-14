@@ -1,14 +1,20 @@
 # SSH-Updater
 
-A tiny web UI to update many Linux hosts over SSH, run ad-hoc scripts, and watch live logs
-stream back—backed by MongoDB and secured with JWT. Great for homelabs, small fleets, or any
-time you don’t want to copy-paste the same command into 10 terminals.
-Highlights
+A tiny web UI to update many Linux hosts over SSH, run ad-hoc scripts, and watch live logs stream back—backed by MongoDB and secured with JWT. 
+
+Great for homelabs, small fleets, or anytime you don’t want to copy-paste the same command into 10 terminals.
+
+# Highlights
 • Add & manage hosts (name, IP, SSH user, password, port, root flag)
+
 • One-click apt update/upgrade per host or Update all
+
 • Run custom commands or full bash scripts on selected hosts
+
 • Live log streaming (SSE) for single/all/custom jobs
+
 • JWT authentication with MongoDB storage
+
 • Docker-ready (sample docker-compose included)
 
 # Screenshots
@@ -81,9 +87,13 @@ volumes:
 # Security Notes
 
 • Passwords are stored in MongoDB for demo convenience — use SSH keys in production.
+
 • Set a strong JWT_SECRET.
+
 • Prefer HTTPS and restrict network access to known hosts.
+
 
 # License
 MIT License — use freely, no warranty.
+
 Do what you want, just don’t blame us if your cat upgrades the wrong server.

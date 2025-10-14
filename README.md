@@ -18,10 +18,13 @@ Highlights
 <img width="1182" height="317" alt="Screenshot 2025-10-14 at 21 41 35" src="https://github.com/user-attachments/assets/8ed14d5d-6aac-40d4-8349-9bc74e93b600" />
 <img width="1182" height="794" alt="Screenshot 2025-10-14 at 21 42 24" src="https://github.com/user-attachments/assets/996240d1-3d34-499e-b94d-01ecc6e970cc" />
 
-Quick Start (Docker Compose)
+# Quick Start (Docker Compose)
+
 Use the provided docker-compose file to launch SSH Updater along with MongoDB and
 mongo-express.
+
 Once started, access the web UI at http://localhost:8099.
+
 The first user can self-register. After that, only logged-in users can add more users.
 
 # docker-compose.yml example

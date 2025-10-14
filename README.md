@@ -12,18 +12,67 @@ Highlights
 • Docker-ready (sample docker-compose included)
 
 # Screenshots
+<img width="1702" height="453" alt="Screenshot 2025-10-14 at 21 38 48" src="https://github.com/user-attachments/assets/560c2e9f-cdfd-4f88-ab80-c214f6a1487a" />
+<img width="1182" height="453" alt="Screenshot 2025-10-14 at 21 40 44" src="https://github.com/user-attachments/assets/8235700e-e9e6-4ba2-a2a9-e0010e7941e9" />
+<img width="1182" height="317" alt="Screenshot 2025-10-14 at 21 41 35" src="https://github.com/user-attachments/assets/8ed14d5d-6aac-40d4-8349-9bc74e93b600" />
+<img width="1182" height="794" alt="Screenshot 2025-10-14 at 21 42 24" src="https://github.com/user-attachments/assets/996240d1-3d34-499e-b94d-01ecc6e970cc" />
 
-Include images such as:
-• Dashboard – Add Host & Update All
-• Run Custom Script (with live logs)
-• Live Logs – Update All (SSE)
-• Edit Host Modal
-(Place images under docs/screenshots/ and link them in README.md)
 Quick Start (Docker Compose)
 Use the provided docker-compose file to launch SSH Updater along with MongoDB and
 mongo-express.
 Once started, access the web UI at http://localhost:8099.
 The first user can self-register. After that, only logged-in users can add more users.
+
+# docker-compose.yml example
+
+```
+services:
+  web:
+    image: kosztyk/ssh-updater:latest
+    container_name: ssh-updater
+    restart: unless-stopped
+    ports:
+      - "8099:8080"
+    environment:
+      - TZ=Europe/Bucharest
+      - MONGO_URL=mongodb://mongo:27017/sshupdater
+      - JWT_SECRET=changeme
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:4.4
+    container_name: ssh-updater-mongo
+    restart: unless-stopped
+    command: ["--bind_ip_all"]
+    ports:
+      - "27017:27017"   # optional for host debugging; you can remove later
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mongo-express:
+    image: mongo-express
+    container_name: mongo-express
+    restart: always
+    ports:
+      - "8082:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_BASICAUTH_USERNAME: changeme
+      ME_CONFIG_BASICAUTH_PASSWORD: changeme
+      ME_CONFIG_MONGODB_URL: mongodb://mongo:27017/
+    depends_on:
+      - mongo   
+
+volumes:
+  mongo_data:
+```
 
 # Security Notes
 

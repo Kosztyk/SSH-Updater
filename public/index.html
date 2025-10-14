@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SSH Updater</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/sshupdater.ico" type="image/x-icon" />
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: #f5f7fb; color: #222; }
+
+    /* Header + branding */
+    header { background:#1f2a44; color:#fff; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; }
+    .brand { display:flex; align-items:center; gap:10px; }
+    .logo-badge { display:inline-flex; align-items:center; justify-content:center; height:32px; width:32px; border-radius:8px; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.2); overflow:hidden; }
+    .logo-badge img { display:block; height:28px; width:28px; object-fit:contain; }
+    .brand strong { font-size:1.1rem; font-weight:700; }
+
+    .toolbar { display:flex; gap:8px; }
+    .logout, .adduser { background:transparent; border:1px solid rgba(255,255,255,0.6); color:#fff; border-radius:8px; padding:8px 14px; font-weight:700; cursor:pointer; }
+    .logout:hover, .adduser:hover { background:rgba(255,255,255,0.16); }
+
+    main { max-width:1100px; margin:20px auto; padding:0 16px; }
+    .card { background:#fff; border-radius:12px; padding:16px; box-shadow:0 4px 16px rgba(0,0,0,.06); margin-bottom:16px; }
+    label { display:block; font-weight:600; margin-top:8px; }
+    input[type=text], input[type=password], input[type=number], textarea { width:100%; max-width:100%; box-sizing:border-box; padding:10px; border:1px solid #ddd; border-radius:8px; }
+    textarea { min-height:140px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:24px; row-gap:12px; align-items:start; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; align-items:center; }
+    button { border:0; border-radius:8px; padding:10px 14px; cursor:pointer; font-weight:700; }
+    .primary { background:#2d6cdf; color:#fff; }
+    .danger { background:#dc3545; color:#fff; }
+    .ghost { background:transparent; border:1px solid #ccc; }
+    .secondary { background:#eef2ff; color:#26335a; border:1px solid #cfd8ff; }
+    .secondary:hover { background:#e6ecff; }
+
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; font-size:14px; }
+    th { background:#fafafa; }
+    code { background:#f0f3fa; padding:2px 6px; border-radius:4px; }
+    .mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; max-height:250px; overflow:auto; background:#0f1d2a; color:#e6edf3; border-radius:8px; padding:12px; }
+
+    /* Upload label styled like a button */
+    .btn{
+      display:inline-flex; align-items:center; justify-content:center;
+      padding:10px 14px; height:36px; border-radius:8px; font-weight:700; cursor:pointer; line-height:1; box-sizing:border-box;
+    }
+    .btn.ghost{ background:transparent; border:1px solid #ccc; color:#222; }
+    .btn.ghost:hover{ background:#f5f7fb; }
+    label.btn{ margin:0; font-weight:700; display:inline-flex !important; }
+    #scriptFile{ display:none; }
+
+    /* Modal (Logs) */
+    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.45); display:none; align-items:center; justify-content:center; z-index:1000; }
+    .modal { width:min(1100px, calc(100% - 32px)); max-height:85vh; overflow:auto; background:#fff; border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+    .modal header { position:sticky; top:0; background:#0f1d2a; color:#fff; border-radius:14px 14px 0 0; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; }
+    .modal header h3 { margin:0; font-size:1rem; }
+    .modal .content { padding:14px; }
+    .close-btn { background:transparent; border:1px solid rgba(255,255,255,0.6); color:#fff; border-radius:8px; padding:6px 10px; font-weight:700; cursor:pointer; }
+    .close-btn:hover { background:rgba(255,255,255,0.16); }
+
+    /* Host result blocks inside modal */
+    .host-block { background:#f7f9fc; border:1px solid #e9edf5; border-radius:10px; margin:10px 0; }
+    .host-head { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid #e9edf5; }
+    .host-title { font-weight:700; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .ok { background:#e9f7ef; color:#1b7f38; }
+    .fail { background:#fde8e9; color:#a91e2c; }
+    .small { opacity:.8; font-size:12px; margin-left:8px; }
+    .host-body { padding:12px; }
+    .host-body .mono { max-height:none; }
+
+    /* Small modal (Add user / Edit host) */
+    .modal-mini .modal { width: 520px; }
+    .modal-mini .modal .row { grid-template-columns: 1fr; }
+    .modal-mini .modal .actions { justify-content:flex-end; }
+
+    /* Host chooser list */
+    .host-chooser { max-height: 220px; overflow:auto; border:1px solid #e7ebf3; border-radius:8px; padding:8px; background:#fafcff; }
+    .host-chooser label { display:flex; align-items:center; gap:8px; margin:6px 0; font-weight:500; }
+    .host-chooser .muted { opacity:.7; font-size:12px; }
+
+    @media (max-width:900px) { .row { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo-badge"><img src="/sshupdater.png" alt="SSH Updater logo" onerror="this.onerror=null;this.src='/ssh-updater-logo-134x134.png';" /></span>
+      <strong>SSH Updater</strong>
+    </div>
+    <div class="toolbar">
+      <button class="adduser" onclick="openAddUser()">Add User</button>
+      <button class="logout" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Add Host -->
+    <div class="card">
+      <h3>Add Host</h3>
+      <div class="row">
+        <div>
+          <label>Display Name (optional)</label>
+          <input id="name" type="text" placeholder="e.g. web-1" />
+        </div>
+        <div>
+          <label>IP / Hostname</label>
+          <input id="ip" type="text" placeholder="192.168.1.10" />
+        </div>
+        <div>
+          <label>SSH User</label>
+          <input id="user" type="text" placeholder="root or ubuntu" />
+        </div>
+        <div>
+          <label>Password</label>
+          <input id="password" type="password" placeholder="********" />
+        </div>
+        <div>
+          <label>Port</label>
+          <input id="port" type="number" value="22" />
+        </div>
+        <div>
+          <label>Is Root User?</label>
+          <input id="isRoot" type="checkbox" /> <small>(check if user is already root)</small>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="addHost()">Add</button>
+        <button class="ghost" onclick="refresh(true)">Refresh</button>
+        <button class="danger" onclick="runAll()">Update all Hosts</button>
+      </div>
+      <div id="addMsg"></div>
+    </div>
+
+    <!-- Run custom command / script -->
+    <div class="card">
+      <h3>Run custom command or bash script</h3>
+      <div class="row">
+        <div>
+          <label>Command / Script</label>
+          <textarea id="customScript" placeholder="# Example
+apt-get update -y && apt-get upgrade -y
+# or paste a multiline bash script here"></textarea>
+
+          <div class="actions">
+            <input id="scriptFile" type="file" accept=".sh,.txt,.bash,.zsh,.ksh,.command,text/plain" />
+            <label for="scriptFile" class="btn ghost">Upload file into the box</label>
+            <button class="primary" onclick="runCustom()">Execute on selected</button>
+          </div>
+          <div id="customMsg" class="muted" style="margin-top:6px;color:#555;"></div>
+        </div>
+
+        <div>
+          <label>Choose hosts</label>
+          <div class="host-chooser" id="hostChooser">
+            <label><input type="checkbox" id="chooseAll" onchange="toggleChooseAll(this.checked)" /> <strong>Select all</strong></label>
+            <!-- host checkboxes injected here -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hosts table -->
+    <div class="card">
+      <h3>Hosts</h3>
+      <table id="hostsTbl">
+        <thead>
+          <tr>
+            <th>Name</th><th>IP</th><th>User</th><th>Port</th><th>Root?</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- Logs Modal -->
+  <div id="logModal" class="modal-backdrop" onclick="if(event.target.id==='logModal') closeLogs()">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="logModalTitle">
+      <header>
+        <h3 id="logModalTitle">Execution Logs</h3>
+        <button class="close-btn" onclick="closeLogs()">Close</button>
+      </header>
+        <div class="content" id="logModalContent"></div>
+    </div>
+  </div>
+
+  <!-- Add User modal -->
+  <div id="addUserModal" class="modal-backdrop modal-mini" onclick="backdropClose(event)">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addUserTitle">
+      <header>
+        <h3 id="addUserTitle">Add User</h3>
+        <button class="close-btn" onclick="closeAddUser()">Close</button>
+      </header>
+      <div class="content">
+        <div class="row">
+          <div>
+            <label>Username</label>
+            <input id="newUser" type="text" placeholder="new username" />
+          </div>
+          <div>
+            <label>Password</label>
+            <input id="newPass" type="password" placeholder="set password" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:10px;">
+          <button class="ghost" onclick="closeAddUser()">Cancel</button>
+          <button class="primary" onclick="createUser()">Create</button>
+        </div>
+        <div id="addUserMsg" style="margin-top:8px;color:#444;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Host modal -->
+  <div id="editHostModal" class="modal-backdrop modal-mini" onclick="if(event.target.id==='editHostModal') closeEditHost()">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editHostTitle">
+      <header>
+        <h3 id="editHostTitle">Edit Host</h3>
+        <button class="close-btn" onclick="closeEditHost()">Close</button>
+      </header>
+      <div class="content">
+        <input type="hidden" id="edit_id" />
+        <div class="row">
+          <div>
+            <label>Name</label>
+            <input id="edit_name" type="text" />
+          </div>
+          <div>
+            <label>IP / Hostname</label>
+            <input id="edit_ip" type="text" />
+          </div>
+          <div>
+            <label>SSH User</label>
+            <input id="edit_user" type="text" />
+          </div>
+          <div>
+            <label>Password <small class="small">(leave blank to keep existing)</small></label>
+            <input id="edit_password" type="password" placeholder="********" />
+          </div>
+          <div>
+            <label>Port</label>
+            <input id="edit_port" type="number" value="22" />
+          </div>
+          <div>
+            <label>Is Root User?</label>
+            <input id="edit_isRoot" type="checkbox" />
+          </div>
+        </div>
+        <div class="actions" style="margin-top:10px;">
+          <button class="ghost" onclick="closeEditHost()">Cancel</button>
+          <button class="primary" onclick="saveEditHost()">Save</button>
+        </div>
+        <div id="editHostMsg" style="margin-top:8px;color:#444;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ---------- Robust refresh helper ----------
+    let hostsCache = new Map();
+
+    async function refresh(force = false) {
+      try {
+        const url = '/api/hosts' + (force ? `?t=${Date.now()}` : '');
+        const r = await fetch(url, { credentials: 'include', cache: 'no-store' });
+        const ct = (r.headers.get('content-type') || '');
+        if (!r.ok || !ct.includes('application/json')) throw new Error('Unexpected response');
+        const data = await r.json();
+
+        // Cache for editing
+        hostsCache = new Map(data.map(h => [h._id, h]));
+
+        // table
+        const tbody = document.querySelector('#hostsTbl tbody');
+        tbody.innerHTML = '';
+        data.forEach(h => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${h.name}</td>
+            <td>${h.ip}</td>
+            <td>${h.user}</td>
+            <td>${h.port}</td>
+            <td>${h.isRoot ? 'yes' : 'no'}</td>
+            <td style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button class="primary" onclick="runHost('${h._id}')">Run</button>
+              <button class="secondary" onclick="openEditHost('${h._id}')">Edit</button>
+              <button class="ghost" onclick="removeHost('${h._id}')">Delete</button>
+            </td>`;
+          tbody.appendChild(tr);
+        });
+
+        // chooser
+        const chooser = document.getElementById('hostChooser');
+        chooser.querySelectorAll('label[data-dyn]').forEach(el => el.remove());
+        data.forEach(h => {
+          const row = document.createElement('label');
+          row.setAttribute('data-dyn','1');
+          row.innerHTML = `<input type="checkbox" data-host value="${h._id}" /> ${escapeHtml(h.name)} <span class="muted">(${escapeHtml(h.ip)})</span>`;
+          chooser.appendChild(row);
+        });
+      } catch (e) {
+        console.error('refresh failed; forcing full reload', e);
+        setTimeout(() => location.reload(), 150);
+      }
+    }
+
+    // track actions after closing log modal
+    let refreshOnLogClose = false;
+    let resetCustomOnClose = false;
+
+    // ---------- Logs modal (and SSE handle) ----------
+    let currentES = null; // active EventSource
+
+    function ensureLogModal(title) {
+      document.getElementById('logModalTitle').textContent = title || 'Execution Logs';
+      document.getElementById('logModalContent').innerHTML = '';
+      document.getElementById('logModal').style.display = 'flex';
+    }
+
+    function openLogs(title, html, refreshAfterClose = false, resetCustom = false) {
+      refreshOnLogClose = !!refreshAfterClose;
+      resetCustomOnClose = !!resetCustom;
+      ensureLogModal(title);
+      if (html) document.getElementById('logModalContent').innerHTML = html;
+    }
+
+    function appendHostBlockIfMissing(key, name, ip) {
+      const c = document.getElementById('logModalContent');
+      if (document.getElementById(`hb-${CSS.escape(key)}`)) return;
+
+      const block = document.createElement('div');
+      block.className = 'host-block';
+      block.id = `hb-${key}`;
+      block.innerHTML = `
+        <div class="host-head">
+          <div class="host-title">${escapeHtml(name)} <span class="small">(${escapeHtml(ip||'')})</span></div>
+          <span class="pill" id="pill-${key}">RUNNING</span>
+        </div>
+        <div class="host-body">
+          <div class="small" style="margin-bottom:6px;" id="meta-${key}">starting...</div>
+          <pre class="mono" id="pre-${key}"></pre>
+        </div>`;
+      c.appendChild(block);
+    }
+
+    function appendLog(key, chunk) {
+      const pre = document.getElementById(`pre-${key}`);
+      if (!pre) return;
+      pre.textContent += chunk;
+      pre.parentElement.scrollTop = pre.parentElement.scrollHeight;
+    }
+
+    function setHostEnd(key, ok, ms, code, err) {
+      const pill = document.getElementById(`pill-${key}`);
+      const meta = document.getElementById(`meta-${key}`);
+      if (pill) {
+        pill.className = `pill ${ok ? 'ok' : 'fail'}`;
+        pill.textContent = ok ? 'OK' : 'FAIL';
+      }
+      if (meta) meta.textContent = `exitCode=${code ?? 'n/a'} • time=${ms ?? 0}ms${err ? ' • '+err : ''}`;
+    }
+
+    function closeLogs() {
+      if (currentES) { try { currentES.close(); } catch(_){} currentES = null; }
+      document.getElementById('logModal').style.display = 'none';
+      document.getElementById('logModalContent').innerHTML = '';
+      if (resetCustomOnClose) { resetCustomOnClose = false; resetCustomForm(); }
+      if (refreshOnLogClose) { refreshOnLogClose = false; refresh(true); }
+    }
+
+    // ---------- Auth buttons ----------
+    async function logout() {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      location.href = '/login.html';
+    }
+    function openAddUser() {
+      document.getElementById('addUserModal').style.display = 'flex';
+      document.getElementById('addUserMsg').textContent = '';
+      document.getElementById('newUser').focus();
+    }
+    function closeAddUser() { document.getElementById('addUserModal').style.display = 'none'; }
+    function backdropClose(e) { if (e.target.id === 'addUserModal') closeAddUser(); }
+    async function createUser() {
+      const username = document.getElementById('newUser').value.trim();
+      const password = document.getElementById('newPass').value;
+      if (!username || !password) { document.getElementById('addUserMsg').textContent = 'Username and password are required.'; return; }
+      const r = await fetch('/api/auth/register', { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify({ username, password }) });
+      const data = await r.json();
+      if (data.ok) { document.getElementById('addUserMsg').textContent = 'User created.'; setTimeout(closeAddUser, 700); }
+      else { document.getElementById('addUserMsg').textContent = data.error || 'Failed to create user.'; }
+    }
+
+    // ---------- Run apt on one host (SSE streaming) ----------
+    async function runHost(id) {
+      ensureLogModal('Execution Logs (streaming)…');
+
+      if (currentES) currentES.close();
+      currentES = new EventSource(`/api/stream/run/${encodeURIComponent(id)}`);
+
+      currentES.addEventListener('hostStart', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host || id).replaceAll(':','_');
+        appendHostBlockIfMissing(key, d.host || 'host', d.ip);
+      });
+      currentES.addEventListener('log', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host || id).replaceAll(':','_');
+        appendLog(key, d.chunk);
+      });
+      currentES.addEventListener('hostEnd', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host || id).replaceAll(':','_');
+        setHostEnd(key, d.ok, d.durationMs, d.exitCode, d.error);
+      });
+      currentES.addEventListener('done', () => {
+        if (currentES) { currentES.close(); currentES = null; }
+      });
+    }
+
+    // ---------- Run apt on all hosts (SSE streaming) ----------
+    async function runAll() {
+      if (!confirm('Run update/upgrade on ALL hosts?')) return;
+
+      ensureLogModal('Executing on all hosts (streaming)…');
+
+      if (currentES) currentES.close();
+      currentES = new EventSource('/api/stream/runAll');
+
+      currentES.addEventListener('hostStart', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host).replaceAll(':','_');
+        appendHostBlockIfMissing(key, d.host || 'host', d.ip);
+      });
+      currentES.addEventListener('log', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host).replaceAll(':','_');
+        appendLog(key, d.chunk);
+      });
+      currentES.addEventListener('hostEnd', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host).replaceAll(':','_');
+        setHostEnd(key, d.ok, d.durationMs, d.exitCode, d.error);
+      });
+      currentES.addEventListener('done', () => {
+        if (currentES) { currentES.close(); currentES = null; }
+      });
+    }
+
+    // ---------- File picker for custom ----------
+    document.getElementById('scriptFile').addEventListener('change', (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => { document.getElementById('customScript').value = reader.result; };
+      reader.readAsText(f);
+    });
+
+    function toggleChooseAll(checked) {
+      document.querySelectorAll('#hostChooser input[type=checkbox][data-host]').forEach(cb => cb.checked = checked);
+    }
+
+    function utf8ToB64(str) { return btoa(unescape(encodeURIComponent(str))); }
+
+    // Clear custom section (textarea + file + host selections + "Select all")
+    function resetCustomForm() {
+      document.getElementById('customScript').value = '';
+      document.getElementById('scriptFile').value = '';
+      document.querySelectorAll('#hostChooser input[type=checkbox][data-host]').forEach(cb => cb.checked = false);
+      const all = document.getElementById('chooseAll');
+      if (all) all.checked = false;
+    }
+
+    // ---------- Run custom (SSE streaming) ----------
+    async function runCustom() {
+      const script = document.getElementById('customScript').value;
+      const ids = Array.from(document.querySelectorAll('#hostChooser input[type=checkbox][data-host]:checked')).map(cb => cb.value);
+      if (!script.trim()) { document.getElementById('customMsg').textContent = 'Please paste a command or script.'; return; }
+      if (ids.length === 0) { document.getElementById('customMsg').textContent = 'Select at least one host.'; return; }
+
+      document.getElementById('customMsg').textContent = 'Starting…';
+
+      // Create a streaming job
+      const b64 = utf8ToB64(script);
+      if (b64.length > 280000) { document.getElementById('customMsg').textContent = 'Script too large (max ~200 KB).'; return; }
+
+      let r, data;
+      try {
+        r = await fetch('/api/runCustomStream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ hostIds: ids, scriptB64: b64 })
+        });
+        data = await r.json();
+      } catch (e) {
+        openLogs('Error', `<div class="host-block"><div class="host-body"><pre class="mono">${escapeHtml(e.message)}</pre></div></div>`);
+        document.getElementById('customMsg').textContent = '';
+        return;
+      }
+
+      document.getElementById('customMsg').textContent = '';
+
+      if (!r.ok || !data || !data.ok || !data.jobId) {
+        openLogs('Error', `<div class="host-block"><div class="host-body"><pre class="mono">${escapeHtml(JSON.stringify(data))}</pre></div></div>`);
+        return;
+      }
+
+      // Open modal immediately and stream live logs
+      resetCustomOnClose = true;   // clear textarea & selections when user closes
+      refreshOnLogClose = true;    // refresh hosts list when user closes
+      ensureLogModal('Executing custom script (streaming)…');
+
+      if (currentES) currentES.close();
+      currentES = new EventSource(`/api/stream/runCustom?job=${encodeURIComponent(data.jobId)}`);
+
+      currentES.addEventListener('hostStart', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host).replaceAll(':','_');
+        appendHostBlockIfMissing(key, d.host || 'host', d.ip);
+      });
+      currentES.addEventListener('log', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host).replaceAll(':','_');
+        appendLog(key, d.chunk);
+      });
+      currentES.addEventListener('hostEnd', (e) => {
+        const d = JSON.parse(e.data);
+        const key = (d.ip || d.host).replaceAll(':','_');
+        setHostEnd(key, d.ok, d.durationMs, d.exitCode, d.error);
+      });
+      currentES.addEventListener('done', () => {
+        if (currentES) { currentES.close(); currentES = null; }
+      });
+    }
+
+    // ---------- Edit Host ----------
+    function openEditHost(id) {
+      const h = hostsCache.get(id);
+      if (!h) return;
+      document.getElementById('edit_id').value = h._id;
+      document.getElementById('edit_name').value = h.name || '';
+      document.getElementById('edit_ip').value = h.ip || '';
+      document.getElementById('edit_user').value = h.user || '';
+      document.getElementById('edit_password').value = ''; // blank -> keep existing
+      document.getElementById('edit_port').value = h.port || 22;
+      document.getElementById('edit_isRoot').checked = !!h.isRoot;
+      document.getElementById('editHostMsg').textContent = '';
+      document.getElementById('editHostModal').style.display = 'flex';
+      document.getElementById('edit_name').focus();
+    }
+    function closeEditHost() {
+      document.getElementById('editHostModal').style.display = 'none';
+    }
+    async function saveEditHost() {
+      const id = document.getElementById('edit_id').value;
+      const payload = {
+        name: document.getElementById('edit_name').value.trim(),
+        ip: document.getElementById('edit_ip').value.trim(),
+        user: document.getElementById('edit_user').value.trim(),
+        port: Number(document.getElementById('edit_port').value) || 22,
+        isRoot: document.getElementById('edit_isRoot').checked
+      };
+      const pwd = document.getElementById('edit_password').value;
+      if (pwd) payload.password = pwd; // only send if changed
+
+      try {
+        const r = await fetch('/api/hosts/' + id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(payload)
+        });
+        const data = await r.json();
+        if (r.ok && data && !data.error) {
+          closeEditHost();
+          await refresh(true);
+        } else {
+          document.getElementById('editHostMsg').textContent = data.error || 'Failed to update host';
+        }
+      } catch (e) {
+        document.getElementById('editHostMsg').textContent = 'Network error: ' + e.message;
+      }
+    }
+
+    // ---------- Hosts CRUD helpers ----------
+    function clearHostForm() {
+      document.getElementById('name').value = '';
+      document.getElementById('ip').value = '';
+      document.getElementById('user').value = '';
+      document.getElementById('password').value = '';
+      document.getElementById('port').value = '22';
+      document.getElementById('isRoot').checked = false;
+      document.getElementById('name').focus();
+    }
+
+    async function addHost() {
+      const addBtn = document.querySelector('button.primary[onclick="addHost()"]');
+      addBtn.disabled = true;
+
+      try {
+        const body = {
+          name: document.getElementById('name').value.trim(),
+          ip: document.getElementById('ip').value.trim(),
+          user: document.getElementById('user').value.trim(),
+          password: document.getElementById('password').value,
+          port: Number(document.getElementById('port').value) || 22,
+          isRoot: document.getElementById('isRoot').checked
+        };
+
+        const r = await fetch('/api/hosts', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          credentials:'include',
+          body: JSON.stringify(body)
+        });
+        const data = await r.json();
+
+        const msg = document.getElementById('addMsg');
+        if (r.ok && data && !data.error) {
+          msg.textContent = 'Host saved.';
+          clearHostForm();
+          await refresh(true);
+          setTimeout(() => { msg.textContent = ''; }, 2000);
+        } else {
+          msg.textContent = (data && data.error) ? ('Error: ' + data.error) : 'Error saving host';
+        }
+      } catch (e) {
+        document.getElementById('addMsg').textContent = 'Network error: ' + e.message;
+      } finally {
+        addBtn.disabled = false;
+      }
+    }
+
+    async function removeHost(id) {
+      if (!confirm('Delete this host?')) return;
+      await fetch('/api/hosts/' + id, { method: 'DELETE', credentials:'include' });
+      refresh(true);
+    }
+
+    function hostBlock(name, ip, ok, ms, code, log) {
+      const pill = `<span class="pill ${ok ? 'ok' : 'fail'}">${ok ? 'OK' : 'FAIL'}</span>`;
+      const meta = `exitCode=${code ?? 'n/a'} • time=${ms}ms`;
+      return `<div class="host-block">
+        <div class="host-head"><div class="host-title">${escapeHtml(name)} <span class="small">(${escapeHtml(ip||'')})</span></div>${pill}</div>
+        <div class="host-body"><div class="small" style="margin-bottom:6px;">${escapeHtml(meta)}</div><pre class="mono">${escapeHtml(log||'')}</pre></div>
+      </div>`;
+    }
+
+    // Initial load
+    refresh();
+
+    // Utils
+    function escapeHtml(s) { return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  </script>
+</body>
+</html>
+

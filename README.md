@@ -12,6 +12,7 @@ Highlights
 • Docker-ready (sample docker-compose included)
 
 # Screenshots
+<img width="693" height="446" alt="Screenshot 2025-10-14 at 21 52 34" src="https://github.com/user-attachments/assets/1d47b60c-95b2-4854-a8a0-2ec3ca22c53c" />
 <img width="1702" height="453" alt="Screenshot 2025-10-14 at 21 38 48" src="https://github.com/user-attachments/assets/560c2e9f-cdfd-4f88-ab80-c214f6a1487a" />
 <img width="1182" height="453" alt="Screenshot 2025-10-14 at 21 40 44" src="https://github.com/user-attachments/assets/8235700e-e9e6-4ba2-a2a9-e0010e7941e9" />
 <img width="1182" height="317" alt="Screenshot 2025-10-14 at 21 41 35" src="https://github.com/user-attachments/assets/8ed14d5d-6aac-40d4-8349-9bc74e93b600" />

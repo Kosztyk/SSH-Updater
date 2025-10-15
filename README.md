@@ -1,4 +1,4 @@
-# SSH-Updater
+# SSH-Updaterr
 
 A tiny web UI to update many Linux hosts over SSH, run ad-hoc scripts, and watch live logs stream back—backed by MongoDB and secured with JWT. 
 

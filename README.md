@@ -1,4 +1,6 @@
-# SSH-Updater
+<img width="134" height="134" alt="sshupdater" src="https://github.com/user-attachments/assets/a367e0b3-396f-4e5e-8aa8-fd30bb9aceba" />
+
+ # SSH-Updater
 
 A tiny web UI to update many Linux hosts over SSH, run ad-hoc scripts, and watch live logs stream back—backed by MongoDB and secured with JWT. 
 

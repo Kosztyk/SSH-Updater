@@ -15,9 +15,7 @@ const PORT = 8080;
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/sshupdater';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Schemas & Models
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Schemas & Models ─────────────────────────────────────────────────────────
 const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true, index: true },
   passwordHash: String,
@@ -31,15 +29,18 @@ const HostSchema = new mongoose.Schema({
   password: String, // plaintext for demo; prefer key auth or encryption in production
   port: { type: Number, default: 22 },
   isRoot: { type: Boolean, default: false },
+
+  // Container management
+  hasContainers: { type: Boolean, default: false },
+  containerPaths: { type: [String], default: [] },
+
   createdAt: { type: Date, default: Date.now }
 });
 
 const User = mongoose.model('User', UserSchema);
 const Host = mongoose.model('Host', HostSchema);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// App Setup
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── App Setup ────────────────────────────────────────────────────────────────
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
@@ -58,9 +59,7 @@ function requireAuth(req, res, next) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UI (protected root)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Routes: UI (protected root) ─────────────────────────────────────────────
 app.get('/', (req, res) => {
   const token = req.cookies?.token;
   if (!token) return res.redirect('/login.html');
@@ -75,9 +74,7 @@ app.get('/', (req, res) => {
 app.use('/public', express.static(path.join(__dirname, 'public')));
 app.get('/login.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'login.html')));
 
-// ─────────────────────────────────────────────────────────────────────────────
-/* Auth */
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Routes: Auth ────────────────────────────────────────────────────────────
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'username and password are required' });
@@ -116,26 +113,55 @@ app.get('/api/auth/hasUsers', async (req, res) => {
   res.json({ hasUsers: count > 0 });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-/* Hosts CRUD */
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Helpers: normalize container paths ───────────────────────────────────────
+function normalizePaths(body) {
+  let arr = [];
+  if (Array.isArray(body.containerPaths)) arr = body.containerPaths;
+  else if (typeof body.containerPaths === 'string') arr = body.containerPaths.split('\n');
+  else if (typeof body.containerPath === 'string') arr = [body.containerPath];
+  else if (typeof body.containerPathsText === 'string') arr = body.containerPathsText.split('\n');
+
+  return [...new Set(arr.map(s => String(s).replace(/\r/g, '').trim()).filter(Boolean))];
+}
+
+// Escape for inside a double-quoted bash -lc "…"
+function escForDoubleQuotes(s) {
+  return String(s).replace(/(["\\])/g, '\\$1');
+}
+
+// ─── Routes: Hosts CRUD ──────────────────────────────────────────────────────
 app.get('/api/hosts', requireAuth, async (req, res) => {
   const hosts = await Host.find({}).sort({ createdAt: -1 }).lean();
   res.json(hosts);
 });
 
 app.post('/api/hosts', requireAuth, async (req, res) => {
-  const { name, ip, user, password, port, isRoot } = req.body || {};
+  const { name, ip, user, password, port, isRoot, hasContainers } = req.body || {};
   if (!ip || !user || !password) return res.status(400).json({ error: 'ip, user, password are required' });
   const host = await Host.create({
-    name: name || ip, ip, user, password, port: Number(port) || 22, isRoot: !!isRoot
+    name: name || ip,
+    ip,
+    user,
+    password,
+    port: Number(port) || 22,
+    isRoot: !!isRoot,
+    hasContainers: !!hasContainers,
+    containerPaths: normalizePaths(req.body)
   });
   res.json(host);
 });
 
 app.put('/api/hosts/:id', requireAuth, async (req, res) => {
-  const { name, ip, user, password, port, isRoot } = req.body || {};
-  const update = { name, ip, user, port: Number(port) || 22, isRoot: !!isRoot };
+  const { name, ip, user, password, port, isRoot, hasContainers } = req.body || {};
+  const update = {
+    name,
+    ip,
+    user,
+    port: Number(port) || 22,
+    isRoot: !!isRoot,
+    hasContainers: !!hasContainers,
+    containerPaths: normalizePaths(req.body)
+  };
   if (!password) delete update.password;
   const doc = await Host.findByIdAndUpdate(req.params.id, update, { new: true });
   if (!doc) return res.status(404).json({ error: 'Not found' });
@@ -148,12 +174,7 @@ app.delete('/api/hosts/:id', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SSH helpers (ALWAYS via bash -lc with safe single-quote escaping)
-// ─────────────────────────────────────────────────────────────────────────────
-function escSingle(s) { return String(s).replace(/'/g, "'\\''"); }
-const DEFAULT_ENV = { LC_ALL: 'C', PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' };
-
+// ─── SSH helpers ─────────────────────────────────────────────────────────────
 function runAptOnHost(host) {
   return new Promise((resolve) => {
     const conn = new Client();
@@ -162,14 +183,12 @@ function runAptOnHost(host) {
 
     conn.on('ready', () => {
       const nonInteractive = "export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get upgrade -y";
-      const ni = escSingle(nonInteractive);
-      const pw = escSingle(host.password || '');
-
+      const base = `bash -lc "${escForDoubleQuotes(nonInteractive)}"`;
       const cmd = (host.isRoot || host.user === 'root')
-        ? `bash -lc '${ni}'`
-        : `echo '${pw}' | sudo -S -p '' bash -lc '${ni}'`;
+        ? base
+        : `echo '${(host.password || '').replace(/'/g, "'\\''")}' | sudo -S -p '' ${base}`;
 
-      conn.exec(cmd, { env: DEFAULT_ENV }, (err, stream) => {
+      conn.exec(cmd, { env: { LC_ALL: 'C' } }, (err, stream) => {
         if (err) { conn.end(); return resolve({ host: host.name, ip: host.ip, ok: false, error: 'exec: ' + err.message }); }
         stream.on('close', (code, signal) => {
           conn.end();
@@ -195,16 +214,14 @@ function streamAptOnHost(host, onEvent) {
 
   conn.on('ready', () => {
     const nonInteractive = "export DEBIAN_FRONTEND=noninteractive; apt-get update -y && apt-get upgrade -y";
-    const ni = escSingle(nonInteractive);
-    const pw = escSingle(host.password || '');
-
+    const base = `bash -lc "${escForDoubleQuotes(nonInteractive)}"`;
     const cmd = (host.isRoot || host.user === 'root')
-      ? `bash -lc '${ni}'`
-      : `echo '${pw}' | sudo -S -p '' bash -lc '${ni}'`;
+      ? base
+      : `echo '${(host.password || '').replace(/'/g, "'\\''")}' | sudo -S -p '' ${base}`;
 
     onEvent({ type: 'hostStart', host: host.name, ip: host.ip });
 
-    conn.exec(cmd, { env: DEFAULT_ENV }, (err, stream) => {
+    conn.exec(cmd, { env: { LC_ALL: 'C' } }, (err, stream) => {
       if (err) {
         onEvent({ type: 'hostEnd', host: host.name, ip: host.ip, ok: false, error: 'exec: ' + err.message, durationMs: Date.now() - start, exitCode: null });
         conn.end();
@@ -228,20 +245,17 @@ function streamScriptOnHost(host, script, onEvent) {
   const conn = new Client();
   const start = Date.now();
 
-  // Encode script and execute from a temp file
   const b64 = Buffer.from(String(script), 'utf8').toString('base64');
   const remote = `TMP=$(mktemp) && printf '%s' '${b64}' | base64 -d > "$TMP" && chmod +x "$TMP" && bash "$TMP"; rc=$?; rm -f "$TMP"; exit $rc`;
-  const remoteEsc = escSingle(remote);
-  const pw = escSingle(host.password || '');
-
-  const cmd = (host.isRoot || host.user === 'root')
-    ? `bash -lc '${remoteEsc}'`
-    : `echo '${pw}' | sudo -S -p '' bash -lc '${remoteEsc}'`;
+  const base = `bash -lc "${escForDoubleQuotes(remote)}"`;
+  const fullCmd = (host.isRoot || host.user === 'root')
+    ? base
+    : `echo '${(host.password || '').replace(/'/g, "'\\''")}' | sudo -S -p '' ${base}`;
 
   conn.on('ready', () => {
     onEvent({ type: 'hostStart', host: host.name, ip: host.ip });
 
-    conn.exec(cmd, { env: DEFAULT_ENV }, (err, stream) => {
+    conn.exec(fullCmd, { env: { LC_ALL: 'C' } }, (err, stream) => {
       if (err) {
         onEvent({ type: 'hostEnd', host: host.name, ip: host.ip, ok: false, error: 'exec: ' + err.message, durationMs: Date.now() - start, exitCode: null });
         conn.end();
@@ -260,9 +274,53 @@ function streamScriptOnHost(host, script, onEvent) {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Non-stream JSON endpoints (compatibility)
-// ─────────────────────────────────────────────────────────────────────────────
+/** Update containers on a host (multiple paths), streaming logs — sequential cd && docker compose … */
+function streamContainersOnHost(host, onEvent) {
+  const conn = new Client();
+  const start = Date.now();
+
+  const paths = (Array.isArray(host.containerPaths) ? host.containerPaths : [])
+    .map(s => String(s).replace(/\r/g, '').trim())
+    .filter(Boolean);
+
+  if (!host.hasContainers || paths.length === 0) {
+    process.nextTick(() => onEvent({ type: 'hostEnd', host: host.name, ip: host.ip, ok: true, exitCode: 0, durationMs: 0 }));
+    return;
+  }
+
+  const cmds = paths.map((p, i) => {
+    const qp = `'${p.replace(/'/g, `'\\''`)}'`;
+    return `echo "=== PATH ${i + 1}/${paths.length}: ${p} ==="; cd ${qp} && docker compose pull && docker compose up -d`;
+  }).join(' && ');
+
+  const base = `bash -lc "${escForDoubleQuotes(cmds)}"`;
+  const fullCmd = (host.isRoot || host.user === 'root')
+    ? base
+    : `echo '${(host.password || '').replace(/'/g, "'\\''")}' | sudo -S -p '' ${base}`;
+
+  conn.on('ready', () => {
+    onEvent({ type: 'hostStart', host: host.name, ip: host.ip });
+
+    conn.exec(fullCmd, { env: { LC_ALL: 'C' } }, (err, stream) => {
+      if (err) {
+        onEvent({ type: 'hostEnd', host: host.name, ip: host.ip, ok: false, exitCode: null, durationMs: Date.now() - start, error: 'exec: ' + err.message });
+        conn.end();
+        return;
+      }
+      stream.on('close', (code) => {
+        onEvent({ type: 'hostEnd', host: host.name, ip: host.ip, ok: code === 0, exitCode: code, durationMs: Date.now() - start });
+        conn.end();
+      }).on('data', d => onEvent({ type: 'log', host: host.name, ip: host.ip, chunk: d.toString() }))
+        .stderr.on('data', d => onEvent({ type: 'log', host: host.name, ip: host.ip, chunk: d.toString() }));
+    });
+  }).on('error', (err) => {
+    onEvent({ type: 'hostEnd', host: host.name, ip: host.ip, ok: false, exitCode: null, durationMs: Date.now() - start, error: 'ssh: ' + err.message });
+  }).connect({
+    host: host.ip, port: host.port || 22, username: host.user, password: host.password, readyTimeout: 20000
+  });
+}
+
+// ─── Non-stream JSON endpoints (compat) ──────────────────────────────────────
 app.post('/api/run/:id', requireAuth, async (req, res) => {
   const host = await Host.findById(req.params.id).lean();
   if (!host) return res.status(404).json({ error: 'Host not found' });
@@ -290,19 +348,16 @@ app.post('/api/runCustom', requireAuth, async (req, res) => {
 
     const hosts = await Host.find({ _id: { $in: hostIds } }).lean();
 
-    // run sequentially to keep response deterministic
     const results = [];
     for (const h of hosts) {
       results.push(await new Promise((resolve) => {
-        let out = '', errTxt = '';
+        let out = '', err = '';
         streamScriptOnHost(h, script, ev => {
           if (ev.type === 'log') out += ev.chunk;
-          else if (ev.type === 'hostEnd') {
-            resolve({
-              host: h.name, ip: h.ip, ok: ev.ok, exitCode: ev.exitCode, durationMs: ev.durationMs,
-              stdout: out.slice(-20000), stderr: errTxt.slice(-20000), error: ev.error
-            });
-          }
+          else if (ev.type === 'hostEnd') resolve({
+            host: h.name, ip: h.ip, ok: ev.ok, exitCode: ev.exitCode, durationMs: ev.durationMs,
+            stdout: out.slice(-20000), stderr: err.slice(-20000), error: ev.error
+          });
         });
       }));
     }
@@ -313,9 +368,7 @@ app.post('/api/runCustom', requireAuth, async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SSE helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── SSE utils ───────────────────────────────────────────────────────────────
 function sseInit(res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -329,9 +382,7 @@ function sseSend(res, event, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Streaming: apt (single + all)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Streaming: apt (single + all) ───────────────────────────────────────────
 app.get('/api/stream/run/:id', requireAuth, async (req, res) => {
   const host = await Host.findById(req.params.id).lean();
   if (!host) return res.status(404).end();
@@ -347,6 +398,7 @@ app.get('/api/stream/run/:id', requireAuth, async (req, res) => {
 app.get('/api/stream/runAll', requireAuth, async (req, res) => {
   const hosts = await Host.find({}).lean();
   sseInit(res);
+  if (!hosts.length) { sseSend(res, 'done', { empty: true }); return res.end(); }
   let remaining = hosts.length;
   hosts.forEach(h => {
     streamAptOnHost(h, (ev) => {
@@ -361,16 +413,14 @@ app.get('/api/stream/runAll', requireAuth, async (req, res) => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-/* Streaming: custom (job + stream) */
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Streaming: custom (job + stream) ────────────────────────────────────────
 const jobs = new Map(); // jobId -> EventEmitter
 function newJob() {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const ee = new EventEmitter();
   ee.setMaxListeners(0);
   jobs.set(id, ee);
-  setTimeout(() => jobs.delete(id), 60 * 60 * 1000); // auto-clean after 1h
+  setTimeout(() => jobs.delete(id), 60 * 60 * 1000);
   return { id, ee };
 }
 
@@ -381,7 +431,6 @@ app.post('/api/runCustomStream', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'hostIds is required' });
     }
     if (!scriptB64) return res.status(400).json({ error: 'scriptB64 required' });
-
     const script = Buffer.from(String(scriptB64), 'base64').toString('utf8');
     if (!script.trim()) return res.status(400).json({ error: 'Empty script' });
     if (script.length > 200 * 1024) return res.status(413).json({ error: 'Script too large (max 200 KB)' });
@@ -389,7 +438,6 @@ app.post('/api/runCustomStream', requireAuth, async (req, res) => {
     const hosts = await Host.find({ _id: { $in: hostIds } }).lean();
     const { id: jobId, ee } = newJob();
 
-    // kick work on next tick; respond immediately with jobId
     process.nextTick(() => {
       let remaining = hosts.length;
       hosts.forEach(h => {
@@ -438,14 +486,46 @@ app.get('/api/stream/runCustom', requireAuth, (req, res) => {
   req.on('close', cleanup);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Static (fallback)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Streaming: containers (all eligible hosts) ──────────────────────────────
+app.get('/api/stream/runContainersAll', requireAuth, async (req, res) => {
+  const hosts = await Host.find({
+    hasContainers: true,
+    containerPaths: { $exists: true, $ne: [], $not: { $size: 0 } }
+  }).lean();
+
+  sseInit(res);
+  if (!hosts.length) { sseSend(res, 'done', { empty: true }); return res.end(); }
+
+  let remaining = hosts.length;
+  hosts.forEach(h => {
+    streamContainersOnHost(h, ev => {
+      if (ev.type === 'hostStart') sseSend(res, 'hostStart', ev);
+      else if (ev.type === 'log') sseSend(res, 'log', ev);
+      else if (ev.type === 'hostEnd') {
+        sseSend(res, 'hostEnd', ev);
+        if (--remaining === 0) { sseSend(res, 'done', {}); res.end(); }
+      }
+    });
+  });
+});
+
+// ─── Streaming: containers (single host) ─────────────────────────────────────
+app.get('/api/stream/runContainers/:id', requireAuth, async (req, res) => {
+  const host = await Host.findById(req.params.id).lean();
+  if (!host) return res.status(404).end();
+
+  sseInit(res);
+  streamContainersOnHost(host, ev => {
+    if (ev.type === 'hostStart') sseSend(res, 'hostStart', ev);
+    else if (ev.type === 'log') sseSend(res, 'log', ev);
+    else if (ev.type === 'hostEnd') { sseSend(res, 'hostEnd', ev); sseSend(res, 'done', {}); res.end(); }
+  });
+});
+
+// ─── Static (fallback) ───────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Start
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Start ───────────────────────────────────────────────────────────────────
 (async function start() {
   await mongoose.connect(MONGO_URL, { ignoreUndefined: true });
   console.log('Connected to Mongo:', MONGO_URL);

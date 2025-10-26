@@ -8,7 +8,7 @@ services:
     environment:
       - TZ=Europe/Bucharest
       - MONGO_URL=mongodb://mongo:27017/sshupdater   # host = service name
-      - JWT_SECRET=changeme
+      - JWT_SECRET=1FloareA1
     depends_on:
       - mongo
     # (optional) wait until mongo is healthy; see section 3

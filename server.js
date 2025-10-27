@@ -15,6 +15,9 @@ const PORT = 8080;
 const MONGO_URL = process.env.MONGO_URL || 'mongodb://localhost:27017/sshupdater';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
+// Timeout to guarantee /api/runCustom never hangs
+const HOST_TIMEOUT_MS = 120000; // 2 minutes per host
+
 // ─── Schemas & Models ─────────────────────────────────────────────────────────
 const UserSchema = new mongoose.Schema({
   username: { type: String, unique: true, index: true },
@@ -30,7 +33,7 @@ const HostSchema = new mongoose.Schema({
   port: { type: Number, default: 22 },
   isRoot: { type: Boolean, default: false },
 
-  // Container management
+  // Container management (present in your newer build)
   hasContainers: { type: Boolean, default: false },
   containerPaths: { type: [String], default: [] },
 
@@ -128,6 +131,10 @@ function normalizePaths(body) {
 function escForDoubleQuotes(s) {
   return String(s).replace(/(["\\])/g, '\\$1');
 }
+
+// From the working version (safe single-quote escaping + default env)
+function escSingle(s) { return String(s).replace(/'/g, "'\\''"); }
+const DEFAULT_ENV = { LC_ALL: 'C', PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' };
 
 // ─── Routes: Hosts CRUD ──────────────────────────────────────────────────────
 app.get('/api/hosts', requireAuth, async (req, res) => {
@@ -240,22 +247,25 @@ function streamAptOnHost(host, onEvent) {
   });
 }
 
-/** Execute custom script as root, streaming logs */
+/** Execute custom script as root, streaming logs — EXACT working version you provided */
 function streamScriptOnHost(host, script, onEvent) {
   const conn = new Client();
   const start = Date.now();
 
+  // Encode script and execute from a temp file (unchanged from your working version)
   const b64 = Buffer.from(String(script), 'utf8').toString('base64');
   const remote = `TMP=$(mktemp) && printf '%s' '${b64}' | base64 -d > "$TMP" && chmod +x "$TMP" && bash "$TMP"; rc=$?; rm -f "$TMP"; exit $rc`;
-  const base = `bash -lc "${escForDoubleQuotes(remote)}"`;
-  const fullCmd = (host.isRoot || host.user === 'root')
-    ? base
-    : `echo '${(host.password || '').replace(/'/g, "'\\''")}' | sudo -S -p '' ${base}`;
+  const remoteEsc = escSingle(remote);
+  const pw = escSingle(host.password || '');
+
+  const cmd = (host.isRoot || host.user === 'root')
+    ? `bash -lc '${remoteEsc}'`
+    : `echo '${pw}' | sudo -S -p '' bash -lc '${remoteEsc}'`;
 
   conn.on('ready', () => {
     onEvent({ type: 'hostStart', host: host.name, ip: host.ip });
 
-    conn.exec(fullCmd, { env: { LC_ALL: 'C' } }, (err, stream) => {
+    conn.exec(cmd, { env: DEFAULT_ENV }, (err, stream) => {
       if (err) {
         onEvent({ type: 'hostEnd', host: host.name, ip: host.ip, ok: false, error: 'exec: ' + err.message, durationMs: Date.now() - start, exitCode: null });
         conn.end();
@@ -274,7 +284,7 @@ function streamScriptOnHost(host, script, onEvent) {
   });
 }
 
-/** Update containers on a host (multiple paths), streaming logs — sequential cd && docker compose … */
+/** Update containers on a host (multiple paths), streaming logs — newer build feature */
 function streamContainersOnHost(host, onEvent) {
   const conn = new Client();
   const start = Date.now();
@@ -342,7 +352,8 @@ app.post('/api/runCustom', requireAuth, async (req, res) => {
     }
     if (!scriptB64) return res.status(400).json({ error: 'scriptB64 required' });
 
-    const script = Buffer.from(String(scriptB64), 'base64').toString('utf8');
+    // Normalize CRLF on decode to avoid phantom ':' lines
+    const script = Buffer.from(String(scriptB64), 'base64').toString('utf8').replace(/\r/g, '');
     if (!script.trim()) return res.status(400).json({ error: 'Empty script' });
     if (script.length > 200 * 1024) return res.status(413).json({ error: 'Script too large (max 200 KB)' });
 
@@ -351,13 +362,35 @@ app.post('/api/runCustom', requireAuth, async (req, res) => {
     const results = [];
     for (const h of hosts) {
       results.push(await new Promise((resolve) => {
-        let out = '', err = '';
-        streamScriptOnHost(h, script, ev => {
-          if (ev.type === 'log') out += ev.chunk;
-          else if (ev.type === 'hostEnd') resolve({
-            host: h.name, ip: h.ip, ok: ev.ok, exitCode: ev.exitCode, durationMs: ev.durationMs,
-            stdout: out.slice(-20000), stderr: err.slice(-20000), error: ev.error
+        let combined = '';
+        let done = false;
+
+        const finish = (payload) => {
+          if (done) return;
+          done = true;
+          resolve(payload);
+        };
+
+        // Safety timeout so UI never hangs
+        const to = setTimeout(() => {
+          finish({
+            host: h.name, ip: h.ip, ok: false, exitCode: null,
+            durationMs: HOST_TIMEOUT_MS,
+            stdout: combined,
+            error: 'timeout: host did not finish within ' + HOST_TIMEOUT_MS + 'ms'
           });
+        }, HOST_TIMEOUT_MS);
+
+        streamScriptOnHost(h, script, ev => {
+          if (ev.type === 'log') {
+            combined += ev.chunk;
+          } else if (ev.type === 'hostEnd') {
+            clearTimeout(to);
+            finish({
+              host: h.name, ip: h.ip, ok: ev.ok, exitCode: ev.exitCode,
+              durationMs: ev.durationMs, stdout: combined, error: ev.error
+            });
+          }
         });
       }));
     }
@@ -431,7 +464,8 @@ app.post('/api/runCustomStream', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'hostIds is required' });
     }
     if (!scriptB64) return res.status(400).json({ error: 'scriptB64 required' });
-    const script = Buffer.from(String(scriptB64), 'base64').toString('utf8');
+    // Normalize CRLF for parity with non-stream path
+    const script = Buffer.from(String(scriptB64), 'base64').toString('utf8').replace(/\r/g, '');
     if (!script.trim()) return res.status(400).json({ error: 'Empty script' });
     if (script.length > 200 * 1024) return res.status(413).json({ error: 'Script too large (max 200 KB)' });
 
@@ -441,6 +475,8 @@ app.post('/api/runCustomStream', requireAuth, async (req, res) => {
     process.nextTick(() => {
       let remaining = hosts.length;
       hosts.forEach(h => {
+        // We let SSE handle streaming; timeouts aren’t as critical here,
+        // but you can replicate HOST_TIMEOUT_MS logic if you want.
         streamScriptOnHost(h, script, (ev) => {
           if (ev.type === 'hostStart') ee.emit('hostStart', ev);
           else if (ev.type === 'log') ee.emit('log', ev);
